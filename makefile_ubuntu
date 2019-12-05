@@ -1,0 +1,38 @@
+#
+# Makefile for the SOSCL
+#
+
+CC=	gcc
+CFLAGS= -g -O2 -pg -W -Wall -DSOSCL_WORD32 -DUBUNTU
+IFLAGS= -I ./include -I ./test/include
+LFLAGS= -L ./
+
+OBJ  = src/publickey/ecc/soscl_ecc.o src/publickey/ecc/ecdsa/soscl_ecdsa.o src/publickey/ecc/keygen/soscl_ecc_keygeneration.o src/publickey/bignumbers/soscl_bignumbers.o
+OBJ += src/hash/soscl_hash_sha.o
+OBJ += src/hash/sha256/soscl_hash_sha256.o
+OBJ += src/hash/sha512/soscl_hash_sha512.o
+OBJ += src/hash/sha384/soscl_hash_sha384.o src/hash/soscl_hmac.o
+OBJ += src/main.o
+OBJ += src/management/string/soscl_mem_ops.o
+OBJ += src/management/info/soscl_info.o
+OBJ += src/management/support/soscl_stack.o src/management/support/soscl_init.o
+OBJ += src/random/soscl_rand_rng.o src/random/soscl_rand_sp800_90a_hash_drbg.o
+OBJ += src/management/self_tests/soscl_hash_stests.o src/management/self_tests/soscl_ecdsa_stests.o
+OBJ += test/src/ecdsatest.o test/src/shatest.o test/src/ecctest.o test/src/bignumberstest.o
+OBJ += test/src/commontest.o
+
+all:	soscl_library.exe
+
+#
+# Dependencies
+#
+
+%.o:	%.c
+	$(CC) $(CFLAGS) $(IFLAGS) -c -o $@ $<
+
+soscl_library.exe:	$(OBJ)
+	$(CC) $(CFLAGS) $(IFLAGS)  $(LFLAGS) -o soscl_library.exe $(OBJ) $(LIBFLAGS)
+
+
+# End Of Makefile
+

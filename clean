@@ -1,0 +1,4 @@
+find . -name "*.o" -print -exec rm -f {} \;
+find . -name "*.S" -print -exec rm -f {} \;
+find . -name "*~" -print -exec rm -f {} \;
+

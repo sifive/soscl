@@ -1,0 +1,52 @@
+#
+# Makefile for the SOSCL
+#
+
+CROSS_COMPILE =	/home/yann/FreedomStudio/SiFive/riscv64-unknown-elf-gcc-8.3.0-2019.08.0/bin/riscv64-unknown-elf
+CC=	$(CROSS_COMPILE)-gcc
+AR=	$(CROSS_COMPILE)-ar
+ARCH= rv32imac
+#TARGET=SOSCL_SIFIVE_E31
+
+ifeq ($(TARGET),)
+	TARGET = SOSCL_SIFIVE_E31
+endif
+
+.PHONY: print_vars
+printf_vars:
+	@echo "$(TARGET)"
+
+CFLAGS= -g -O2 -W -Wall -DSOSCL_WORD32 -D$(TARGET) -march=$(ARCH) -D$(ARCH) -mabi=ilp32 -mcmodel=medlow -ffunction-sections -fdata-sections -finline-functions --specs=nano.specs -DSOSCL_WORD32 -Wl,--gc-sections -Wl,-Map,sifive-welcome.map -nostartfiles -nostdlib
+
+IFLAGS= -I ./include -I ./test/include
+LFLAGS= -L ./
+ARFLAGS= cru
+
+OBJ  = src/publickey/ecc/soscl_ecc.o src/publickey/ecc/ecdsa/soscl_ecdsa.o src/publickey/ecc/keygen/soscl_ecc_keygeneration.o src/publickey/bignumbers/soscl_bignumbers.o
+OBJ += src/hash/soscl_hash_sha.o
+OBJ += src/hash/sha256/soscl_hash_sha256.o
+OBJ += src/hash/sha512/soscl_hash_sha512.o
+OBJ += src/hash/sha384/soscl_hash_sha384.o src/hash/soscl_hmac.o
+OBJ += src/management/string/soscl_mem_ops.o
+OBJ += src/management/info/soscl_info.o
+OBJ += src/management/support/soscl_stack.o src/management/support/soscl_init.o
+OBJ += src/random/soscl_rand_rng.o src/random/soscl_rand_sp800_90a_hash_drbg.o
+OBJ += src/management/self_tests/soscl_hash_stests.o src/management/self_tests/soscl_ecdsa_stests.o
+
+all:	soscl.a
+
+#
+# Dependencies
+#
+
+%.o:	%.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(IFLAGS) -c -o $@ $<
+
+%.S:	%.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(IFLAGS) -c -S -fverbose-asm -o $@ $<
+
+soscl.a:	$(OBJ)
+	$(AR) $(ARFLAGS) libsoscl_$(ARCH)_$(TARGET).a $(OBJ)
+
+# End Of Makefile
+
