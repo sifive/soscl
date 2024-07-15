@@ -1,0 +1,10 @@
+1.0.1:
+* infinite point testing added in add jacobian jacobian
+1.0.0:
+* infinite point testing added in double jacobian
+* support of p-2 curve parameter for modular inversion
+* software get version function added
+* null signature test added
+
+pre-1.0.0:
+* initial release
