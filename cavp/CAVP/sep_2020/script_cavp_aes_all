@@ -1,0 +1,9 @@
+for mode in "ECB CBC OFB CTR"
+do
+    echo "processing $mode json test vector file"
+    continue
+    vectfile=`ls $mode/*Test*`
+    respfile=`ls $mode/*Responses*`
+    echo $vectfile" "$respfile
+    bash ./script_cavp_aes $vectfile $respfile >aes_$mode_json.txt
+done

@@ -1,0 +1,109 @@
+#!/bin/sh
+if test "$#" -ne 2
+then
+    echo "ERROR: format is > $0 <cavp_vector_json_file> <cavp_results_json_file>"
+    echo "$#"
+    exit 0
+fi
+
+#echo "CAVP AES ECB json file processing"
+
+vector_file=$1
+result_file=$2
+
+tc_id_ok=0
+input_ok=0
+key_ok=0
+mct=0
+
+algo="unknown"
+
+algo=`grep "algorithm" "$vector_file"|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+
+#reading lines
+while read p
+do
+    echo $p|grep "MCT" >/dev/null
+    if test "$?" -eq 0
+    then
+	mct=1
+    fi
+    echo $p|grep "direction" >/dev/null
+    if test "$?" -eq 0
+    then
+	direction=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+    fi
+    
+    echo $p|grep "tcId" >/dev/null
+    if test "$?" -eq 0
+    then
+	test_number=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	tc_id_ok=1
+	#search the result of this vector in the result file
+	#first search the line of this test number in the result file
+	noline=`grep -n "tcId" "$result_file"|grep ": $test_number,"|awk -F":" '{print $1}'`
+	#if simple test vector, the output is on one line in the responses file
+	if test "$mct" -eq 0
+	then
+	    #increment by 1, as the result is in the next line
+	    nl=`expr $noline + 1`
+	    output=`head -$nl "$result_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	else
+	    #if mct test vector, the output is on 100 lines in the responses file
+	    nl=`expr $noline + 3`
+	    i=0
+	    output=""
+	    while test $i -ne 100
+	    do
+		ko=`head -$nl "$result_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+		nl=` expr $nl + 1`
+		po=`head -$nl "$result_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+		nl=` expr $nl + 1`
+		co=`head -$nl "$result_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+		output=`echo "$output$ko$po$co"`
+		nl=`expr $nl + 3`
+		i=`expr $i + 1`
+	    done
+	fi
+    fi
+
+    echo $p|grep "pt"|grep -v "crypt" >/dev/null
+    if test "$?" -eq 0
+    then
+	input=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	input_ok=1
+    fi
+
+    echo $p|grep "ct"|grep -v "direction" >/dev/null
+    if test "$?" -eq 0
+    then
+	#it's a decryption but we consider it as input anyway
+	input=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	input_ok=1
+    fi
+
+    echo $p|grep "key"|grep -v "keyLen" >/dev/null
+    if test "$?" -eq 0
+    then
+	key=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	key_ok=1
+    fi
+    echo $p|grep "keyLen" >/dev/null
+    if test "$?" -eq 0
+    then
+	len=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+    fi
+    if test "$key_ok" -eq 1 -a "$input_ok" -eq 1 -a "$tc_id_ok" -eq 1
+    then
+	key_ok=0
+	tc_id_ok=0
+	input_ok=0
+	if test "$mct" -eq 1
+	then
+	    mcts="-MCT"
+	else
+	    mcts="-GEN"
+	fi
+	echo "algo:AES$mcts test:$test_number mode:ECB length:$len input:$input key:$key operation:$direction output:$output"
+    fi
+done <"$vector_file"

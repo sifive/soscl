@@ -1,0 +1,18 @@
+[
+    {
+      "url": "/acvp/v1/persons"
+    }, 
+    {
+      "fullName": "Yann Loisel",
+      "vendorUrl": "/acvp/v1/vendors/xxxxx",
+      "emails": [
+        "yann.loisel@sifive.com"
+      ],
+      "phoneNumbers": [
+        {
+          "number": "+33 6748 741 34",
+          "type": "voice"
+        }
+      ]
+    }
+]

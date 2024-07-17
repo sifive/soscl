@@ -1,0 +1,80 @@
+#!/bin/sh
+if test "$#" -ne 1
+then
+    echo "ERROR: format is > $0 <cavp_file>"
+    echo "$#"
+    exit 0
+fi
+
+file=$1
+
+
+crypto_ok=0
+msg_ok=0
+key_ok=0
+
+algo="unknown"
+mode="encrypt"
+
+keybits=`grep "Key Length" $file|awk '{print $5}'`
+
+if test "$keybits" -eq 128
+then
+    algo="AES-128"
+fi
+
+if test "$keybits" -eq 192
+then
+    algo="AES-192"
+fi
+
+if test "$keybits" -eq 256
+then
+    algo="AES-256"
+fi
+
+while read p
+do
+    echo $p|grep "ENCRYPT" >/dev/null
+    if test "$?" -eq 0
+    then
+	mode="ENCRYPT"
+    fi
+    echo $p|grep "DECRYPT" >/dev/null
+    if test "$?" -eq 0
+    then
+	mode="DECRYPT"
+    fi
+    echo $p|grep "KEY" >/dev/null
+    if test "$?" -eq 0
+    then
+	key=`echo $p|awk '{print $3}'`
+	key_ok=1
+    fi
+    echo $p|grep "PLAINTEXT" >/dev/null
+    if test "$?" -eq 0
+    then
+	msg=`echo $p|awk '{print $3}'`
+	msg_ok=1
+    fi
+    echo $p|grep "CIPHERTEXT" >/dev/null
+    if test "$?" -eq 0
+    then
+	crypto=`echo $p|awk '{print $3}'`
+	crypto_ok=1
+    fi
+    if test "$crypto_ok" -eq 1 -a "$key_ok" -eq 1 -a "$msg_ok" -eq 1
+    then
+	crypto_ok=0
+	key_ok=0
+	msg_ok=0
+	if test "$mode" == "ENCRYPT"
+	then
+	    echo "[$algo][0x$msg][0x$key][$mode][0x$crypto]"
+	else
+	    echo "[$algo][0x$crypto][0x$key][$mode][0x$msg]"
+	fi
+    fi
+done <$file
+
+    

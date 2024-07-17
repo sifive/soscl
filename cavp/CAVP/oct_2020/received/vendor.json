@@ -1,0 +1,21 @@
+[
+    {
+      "url": "/acvp/v1/vendors"
+    }, 
+    {
+      "name": "SiFive France",
+      "website": "www.sifive.com",
+      "phoneNumbers": [
+        { "number": "+33 0000 000 00", "type": "voice" }
+      ],
+      "addresses" : [{
+          "street1": "375 Avenue Du Mistral",
+          "street2": "ZI Atheleia 4",
+          "locality": "La Ciotat Cedex",
+          "country": "France",
+          "postalCode": "13600"
+      }]
+    }
+]
+
+

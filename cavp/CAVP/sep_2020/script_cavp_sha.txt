@@ -1,0 +1,57 @@
+#!/bin/sh
+if test "$#" -ne 1
+then
+    echo "ERROR: format is > $0 <cavp_json_file>"
+    echo "$#"
+    exit 0
+fi
+
+echo "CAVP SHA json file processing"
+
+file=$1
+
+
+tc_id_ok=0
+msg_ok=0
+len_ok=0
+
+algo="unknown"
+mode="encrypt"
+
+algo=`grep "algorithm" "$file"|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+
+#reading lines
+while read p
+do
+    echo $p|grep "tcId" >/dev/null
+    if test "$?" -eq 0
+    then
+	test_number=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+#	echo "test_number #$test_number"
+	tc_id_ok=1
+    fi
+
+    echo $p|grep "msg" >/dev/null
+    if test "$?" -eq 0
+    then
+	msg=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	msg_ok=1
+#	echo "msg: <$msg>"
+    fi
+    echo $p|grep "len" >/dev/null
+    if test "$?" -eq 0
+    then
+	len=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	len_ok=1
+#	echo "len: <$len>"
+    fi
+    if test "$len_ok" -eq 1 -a "$msg_ok" -eq 1 -a "$tc_id_ok" -eq 1
+    then
+	len_ok=0
+	tc_id_ok=0
+	msg_ok=0
+	echo "$algo:$test_number:$msg:$len"
+    fi
+done <"$file"
+
+    

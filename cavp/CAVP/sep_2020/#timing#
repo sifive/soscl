@@ -1,0 +1,12 @@
+algo/increment	16		32		64
+sha256		(1018)116mn			46mn
+sha384		(1922)190mn	(2058)138	92mn
+sha512						
+
+aes gcm						141mn
+aes ccm
+aes ecb						53mn
+aes cbc
+aes ctr						59mn
+aes ofb
+aes cfb

@@ -1,0 +1,96 @@
+#script for ACVP SHA json test vectors files conversion: ticket #HWCA-96
+#a test vectors file is supposed to be dedicated to one single mode
+#this script considers the test vectors responses file is not present
+#!/bin/sh
+#v 1.0: cloned from script_cavp_sha in pre-testing mode
+if test "$#" -ne 1
+then
+    echo "ERROR: format is > $0 <cavp_vector_json_file>"
+    echo "$#"
+    exit 0
+fi
+
+#no echo because the script output is redirected
+#echo "CAVP ACVP SHA json file processing"
+
+vector_file=$1
+
+tc_id_ok=0
+input_ok=0
+len_ok=0
+mct=0
+aft=0
+algo="unknown"
+
+#reading all the file lines (the file is given at the done)
+while read p
+do
+    echo $p|grep "algorithm" >/dev/null
+    if test "$?" -eq 0
+    then
+	#determine the algorithm (shall be SHA!) and the mode of operation
+	algo=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	modop=`echo $algo|cut -c5-7`
+	algo=`echo $algo|cut -c1-4`
+#	echo $algorithm" "$algo" "$modop
+	if test "$algo" != "SHA2"
+	then
+	    echo "ERROR: this script only supports SHA files"
+	    exit 1
+	fi
+	#we do that because the cavp python tool expects SHA
+	algo="SHA"
+    fi
+    #determine the test category: MCT or AFT
+    echo $p|grep "testType"|grep "MCT" >/dev/null
+    if test "$?" -eq 0
+    then
+	mct=1
+	aft=0
+    fi
+    echo $p|grep "testType"|grep "AFT" >/dev/null
+    if test "$?" -eq 0
+    then
+	mct=0
+	aft=1
+    fi
+
+    #searching for the result
+    echo $p|grep "tcId" >/dev/null
+    if test "$?" -eq 0
+    then
+	test_number=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	tc_id_ok=1
+    fi
+
+    #determine the input ("msg")
+    echo $p|grep "msg" >/dev/null
+    if test "$?" -eq 0
+    then
+	input=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	input_ok=1
+    fi
+
+ #   determine the msg len (in bits)
+    echo $p|grep "\"len\":" >/dev/null
+   if test "$?" -eq 0
+  then
+	len=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	len_ok=1
+   fi
+    if test "$input_ok" -eq 1 -a "$len_ok" -eq 1 -a "$tc_id_ok" -eq 1
+    then
+	len_ok=0
+	tc_id_ok=0
+	input_ok=0
+	if test "$mct" -eq 1
+	then
+	    type="MCT"
+	fi
+	if test "$aft" -eq 1
+	then
+	    type="AFT"
+	fi
+	echo "algo:$algo type:$type test:$test_number mode:$modop length:$len input:$input"
+    fi
+done <"$vector_file"

@@ -1,0 +1,21 @@
+[
+    {
+      "url": "/acvp/v1/vendors"
+    }, 
+    {
+      "name": "SiFive",
+      "website": "www.sifive.com",
+      "phoneNumbers": [
+        { "number": "+1 415 673-2836", "type": "voice" }
+      ],
+      "addresses" : [{
+          "street1": "1875 South Grant Street",
+          "street2": "Suite 600",
+          "locality": "San Mateo",
+          "country": "USA",
+          "postalCode": "CA 94402"
+      }]
+    }
+]
+
+

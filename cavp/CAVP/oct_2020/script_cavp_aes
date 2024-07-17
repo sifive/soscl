@@ -1,0 +1,444 @@
+#script for ACVP AES json test vectors files conversion: ticket #HWCA-96
+#supports simple modes (i.e. not the GCM and CCM)
+#a test vectors file is supposed to be dedicated to one single mode
+#this script considers the test vectors responses file is not present
+#!/bin/sh
+#v 1.0: cloned from script_cavp_aes for pre-testing
+if test "$#" -ne 1
+then
+    echo "ERROR: format is > $0 <cavp_vector_json_file>"
+    echo "$#"
+    exit 0
+fi
+
+#no echo because the script output is redirected
+#echo "CAVP ACVP AES ECB json file processing"
+
+vector_file=$1
+
+tc_id_ok=0
+input_ok=0
+key_ok=0
+keylen_ok=0
+mct=0
+aft=0
+ctr=0
+iv_mandated=0
+iv_ok=0
+aad_ok=0
+tag_ok=0
+ivlen_ok=0
+taglen_ok=0
+aadlen_ok=0
+payloadlen_ok=0
+direction="-------"
+direction_ok=0
+algo="unknown"
+ccm_mode=0
+gcm_mode=0
+
+#determine the algorithm (shall be AES!) and the mode of operation
+algo=`grep "algorithm" "$vector_file"|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]|cut -c5-`
+modop=`echo $algo|cut -c4-6`
+algo=`echo $algo|cut -c1-3`
+#echo $algo" "$modop
+if test "$algo" != "AES"
+then
+    echo "ERROR: this script only supports AES files"
+    exit 1
+fi
+if test "$modop" != "ECB"
+then
+    iv_mandated=1
+fi
+if test "$modop" == "CCM"
+then
+    ccm_mode=1
+fi
+if test "$modop" == "GCM"
+then
+    gcm_mode=1
+fi
+#reading all the file lines (the file is given at the done)
+while read p
+do
+#group management for encrypt/decrypt management
+    echo $p|grep "tgId" >/dev/null
+    #if a group start is found, we then search for some fields (e.g. direction, aad_len, ...) within this group
+    #within this group means, parsing the lines from the current one up to the next occurence of tgId
+    if test "$?" -eq 0
+    then
+	group_number=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+#	echo "group found: $group_number"
+	tg_id_ok=1
+	noline=`grep -n "tgId" "$vector_file"|grep ": $group_number,"|awk -F":" '{print $1}'`
+#determine the direction
+	nl=`expr $noline + 1`
+	output=""
+	found_or_finished=0
+	while test $found_or_finished -eq 0
+	do
+	    tmp=`head -$nl "$vector_file"|tail -1`
+	    echo "$tmp"|grep "direction" >/dev/null
+	    if test "$?" -eq 0
+	    then
+		direction=`head -$nl "$vector_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+		found_or_finished=1
+		direction_ok=1
+	    fi
+	    echo "$tmp"|grep "tgId" >/dev/null
+	    if test "$?" -eq 0
+	    then
+		found_or_finished=1
+	    fi
+	    nl=` expr $nl + 1`
+	done
+	#if ccm or gcm
+	if test "$ccm_mode" -eq 1 -o "$gcm_mode" -eq 1
+	then
+	    # determine the aadlen
+	    nl=`expr $noline + 1`
+	    output=""
+	    found_or_finished=0
+	    while test $found_or_finished -eq 0
+	    do
+		tmp=`head -$nl "$vector_file"|tail -1`
+		echo "$tmp"|grep "aadLen" >/dev/null
+		if test "$?" -eq 0
+		then
+		    aadlen=`head -$nl "$vector_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+		    found_or_finished=1
+		    aadlen_ok=1
+		fi
+		echo "$tmp"|grep "tgId" >/dev/null
+		if test "$?" -eq 0
+		then
+		    found_or_finished=1
+		fi
+		nl=` expr $nl + 1`
+	    done
+	    # determine the ivlen
+	    nl=`expr $noline + 1`
+	    found_or_finished=0
+	    while test $found_or_finished -eq 0
+	    do
+		tmp=`head -$nl "$vector_file"|tail -1`
+		echo "$tmp"|grep "ivLen" >/dev/null
+		if test "$?" -eq 0
+		then
+		    ivlen=`head -$nl "$vector_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+		    found_or_finished=1
+		    ivlen_ok=1
+		fi
+		echo "$tmp"|grep "tgId" >/dev/null
+		if test "$?" -eq 0
+		then
+		    found_or_finished=1
+		fi
+		nl=` expr $nl + 1`
+	    done
+	    # determine the keylen
+	    nl=`expr $noline + 1`
+	    found_or_finished=0
+	    while test $found_or_finished -eq 0
+	    do
+		tmp=`head -$nl "$vector_file"|tail -1`
+		echo "$tmp"|grep "keyLen" >/dev/null
+		if test "$?" -eq 0
+		then
+		    keylen=`head -$nl "$vector_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+		    found_or_finished=1
+		    keylen_ok=1
+		fi
+		echo "$tmp"|grep "tgId" >/dev/null
+		if test "$?" -eq 0
+		then
+		    found_or_finished=1
+		fi
+		nl=` expr $nl + 1`
+	    done
+	    # determine the taglen
+	    nl=`expr $noline + 1`
+	    found_or_finished=0
+	    while test $found_or_finished -eq 0
+	    do
+		tmp=`head -$nl "$vector_file"|tail -1`
+		echo "$tmp"|grep "tagLen" >/dev/null
+		if test "$?" -eq 0
+		then
+		    taglen=`head -$nl "$vector_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+		    found_or_finished=1
+		    taglen_ok=1
+		fi
+		echo "$tmp"|grep "tgId" >/dev/null
+		if test "$?" -eq 0
+		then
+		    found_or_finished=1
+		fi
+		nl=` expr $nl + 1`
+	    done
+	    # determine the payloadlen
+	    nl=`expr $noline + 1`
+	    found_or_finished=0
+	    while test $found_or_finished -eq 0
+	    do
+		tmp=`head -$nl "$vector_file"|tail -1`
+		echo "$tmp"|grep "payloadLen" >/dev/null
+		if test "$?" -eq 0
+		then
+		    payloadlen=`head -$nl "$vector_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+		    found_or_finished=1
+		    payloadlen_ok=1
+		fi
+		echo "$tmp"|grep "tgId" >/dev/null
+		if test "$?" -eq 0
+		then
+		    found_or_finished=1
+		fi
+		nl=` expr $nl + 1`
+	    done
+#	    echo "payloadLen is $payloadlen, keylen is $keylen, ivlen is $ivlen, taglen is $taglen, aadlen is $aadlen"
+	fi
+    fi
+
+    #determine the test category: MCT, CTR or AFT
+    echo $p|grep "testType"|grep "MCT" >/dev/null
+    if test "$?" -eq 0
+    then
+	mct=1
+	aft=0
+	ctr=0
+    fi
+    echo $p|grep "testType"|grep "AFT" >/dev/null
+    if test "$?" -eq 0
+    then
+	mct=0
+	aft=1
+	ctr=0
+    fi
+    echo $p|grep "testType"|grep "CTR" >/dev/null
+    if test "$?" -eq 0
+    then
+	mct=0
+	aft=0
+	ctr=1
+    fi
+#determine if encrypt or decrypt
+    echo $p|grep "direction" >/dev/null
+    if test "$?" -eq 0
+    then
+	direction=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+    fi
+
+    #determine the iv (may not be present, depends on the mode of operation)
+    #but we dont' check this consistency
+    echo $p|grep "\"iv\"" >/dev/null
+    if test "$?" -eq 0
+    then
+	iv=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	iv_ok=1
+    fi
+
+    #determine the aad (may not be present, depends on the mode of operation)
+    #but we dont' check this consistency
+    echo $p|grep "\"aad\"" >/dev/null
+    if test "$?" -eq 0
+    then
+	aad=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	aad_ok=1
+    fi
+
+    #determine the tag (may be present, depends on the direction of the operation and the mode, GCM)
+    #but we dont' check this consistency
+    echo $p|grep "\"tag\"" >/dev/null
+    if test "$?" -eq 0
+    then
+	tag=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	tag_ok=1
+    fi
+
+    echo $p|grep "tcId" >/dev/null
+    if test "$?" -eq 0
+    then
+	test_number=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	tc_id_ok=1
+	if test "$mct" -eq 0
+	then
+	    #if gcm mode, in decrypt and encrypt mode, there is an additional line, the tag
+	    if test "$gcm_mode" -eq 1
+	    then
+		#if decrypt mode, the tag field is in the input file
+		if test "$direction" == "decrypt"
+		then
+		   #search the result of this vector in the input file
+		   #first search the line of this test number in the result file
+		    noline=`grep -n "tcId" "$vector_file"|grep ": $test_number,"|awk -F":" '{print $1}'`
+		    maxline=`expr $noline + 7`
+		    while test "$noline" -lt  "$maxline"
+		    do
+			ligne=`head -$noline "$vector_file"|tail -1`
+			echo "$ligne"|grep "tag\":" >/dev/null
+			if test "$?" -eq 0
+			then
+			    tag=`echo "$ligne"|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+			    noline=$maxline
+			fi
+			noline=`expr $noline + 1`
+		    done
+		fi
+	    fi
+	fi
+    fi
+
+    #determine the input (maybe "pt" for encryption or "ct" for decryption)
+    #we shall exclude the encrypt and direction words from the search pattern
+    echo $p|grep "pt"|grep -v "crypt" >/dev/null
+    if test "$?" -eq 0
+    then
+	input=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	input_ok=1
+    fi
+
+    #determine the cryptotext
+    echo $p|grep "ct"|grep -v "direction" >/dev/null
+    if test "$?" -eq 0
+    then
+	#it's a decryption but we consider it as input anyway
+	input=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	input_ok=1
+    fi
+
+    #determine the key value
+    echo $p|grep "key"|grep -v "keyLen" >/dev/null
+    if test "$?" -eq 0
+    then
+	key=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	key_ok=1
+	len=${#key}
+	len=` expr $len \* 4`
+	keylen_ok=1
+    fi
+# ECB mode output
+    if test "$iv_mandated" -eq 0 -a "$key_ok" -eq 1 -a "$input_ok" -eq 1 -a "$tc_id_ok" -eq 1
+    then
+	keylen_ok=0
+	key_ok=0
+	tc_id_ok=0
+	input_ok=0
+	if test "$mct" -eq 1
+	then
+	    type="MCT"
+	fi
+	if test "$ctr" -eq 1
+	then
+	    type="CTR"
+	fi
+	if test "$aft" -eq 1
+	then
+	    type="AFT"
+	fi
+	echo "algo:$algo type:$type test:$test_number mode:$modop keylen:$len key:$key input:$input operation:$direction"
+    fi
+    # IV-based modes output
+    if test "$iv_mandated" -eq 1
+    then
+	if test "$ccm_mode" -eq 1 -o "$gcm_mode" -eq 1
+	then
+	    if test "$iv_ok" -eq 1 -a "$key_ok" -eq 1 -a "$input_ok" -eq 1 -a "$tc_id_ok" -eq 1 -a "$aad_ok" -eq 1 -a "$ivlen_ok" -eq 1 -a "$keylen_ok" -eq 1 -a "$payloadlen_ok" -eq 1 -a "$aadlen_ok" -eq 1
+	    then
+		key_ok=0
+		tc_id_ok=0
+		input_ok=0
+		aad_ok=0
+		tag_ok=0
+		iv_ok=0
+		
+		if test "$mct" -eq 1
+		then
+		    type="MCT"
+		fi
+		if test "$ctr" -eq 1
+		then
+		    type="CTR"
+		fi
+		if test "$aft" -eq 1
+		then
+		    type="AFT"
+		fi
+		if test "$ccm_mode" -eq 1
+		then
+		    if test "$direction" == "decrypt"
+		    then
+			tlb=`expr $payloadlen / 4`
+			tagstart=`expr $tlb + 1`
+			if test "$tlb" -eq 0
+			then
+			    tlb=`expr $tlb + 1`
+			fi
+			tag=`echo $input|cut -c$tagstart-`
+			input=`echo $input|cut -c1-$tlb`
+			echo "algo:$algo type:$type test:$test_number mode:$modop keylen:$keylen key:$key ivlen:$ivlen iv:$iv aadlen:$aadlen aad:$aad taglen:$taglen tag:$tag inputlen:$payloadlen input:$input operation:$direction"
+		    fi
+		    if test "$direction" == "encrypt"
+		    then
+			#no tag to display in encryption mode
+			echo "algo:$algo type:$type test:$test_number mode:$modop keylen:$keylen key:$key ivlen:$ivlen iv:$iv aadlen:$aadlen aad:$aad taglen:$taglen inputlen:$payloadlen input:$input operation:$direction"
+		    fi
+		fi
+		if test "$gcm_mode" -eq 1
+		then
+		    #if decrypt, do not display the tag
+		    if test "$direction" == "encrypt"
+		    then
+			echo "algo:$algo type:$type test:$test_number mode:$modop keylen:$keylen key:$key ivlen:$ivlen iv:$iv aadlen:$aadlen aad:$aad taglen:$taglen inputlen:$payloadlen input:$input operation:$direction"
+		    fi
+		    if test "$direction" == "decrypt"
+		    then
+			echo "algo:$algo type:$type test:$test_number mode:$modop keylen:$keylen key:$key ivlen:$ivlen iv:$iv aadlen:$aadlen aad:$aad taglen:$taglen tag:$tag inputlen:$payloadlen input:$input operation:$direction"
+		    fi
+		fi
+	    fi
+	else
+	    if test "$iv_ok" -eq 1 -a "$key_ok" -eq 1 -a "$input_ok" -eq 1 -a "$tc_id_ok" -eq 1 -a "$keylen_ok" -eq 1
+	    then
+		key_ok=0
+		tc_id_ok=0
+		input_ok=0
+		iv_ok=0
+		if test "$mct" -eq 1
+		then
+		    type="MCT"
+		fi
+		if test "$ctr" -eq 1
+		then
+		    type="CTR"
+		fi
+		if test "$aft" -eq 1
+		then
+		    type="AFT"
+		fi
+		echo "algo:$algo type:$type test:$test_number mode:$modop keylen:$len  key:$key iv:$iv input:$input operation:$direction"
+	    fi
+	fi
+    else
+	if test "$key_ok" -eq 1 -a "$input_ok" -eq 1 -a "$tc_id_ok" -eq 1 -a "$keylen_ok" -eq 1
+	    then
+		key_ok=0
+		tc_id_ok=0
+		input_ok=0
+		if test "$mct" -eq 1
+		then
+		    type="MCT"
+		fi
+		if test "$ctr" -eq 1
+		then
+		    type="CTR"
+		fi
+		if test "$aft" -eq 1
+		then
+		    type="AFT"
+		fi
+		echo "algo:$algo type:$type test:$test_number mode:$modop keylen:$len  key:$key input:$input operation:$direction"
+	fi
+    fi
+done <"$vector_file"

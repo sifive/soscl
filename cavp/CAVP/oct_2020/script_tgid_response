@@ -1,0 +1,74 @@
+#!/bin/sh
+file_list=$1
+file_resp=$2
+file_resp_new=$2.new
+file_resp_new_new=$2.new.new
+
+echo "$file_resp_new" >$file_resp_new
+echo "$file_resp_new_new" >$file_resp_new_new
+while read p
+do
+    echo "$p"| grep "tcId\": " >/dev/null
+    if test "$?" -eq 0
+    then
+	tcid=`echo "$p"|awk '{print $2}'|tr -d ","`
+#	echo "tcid=$tcid"
+	grep "  $tcid " $file_list >/dev/null
+	if test "$?" -eq 0
+	then
+	    tgid=`grep "  $tcid " $file_list|awk '{print $1}'`
+	    echo "tgid=$tgid"
+	    echo "]" >>$file_resp_new
+	    echo "},"  >>$file_resp_new
+	    echo "{"  >>$file_resp_new
+	    echo "\"tgId\": $tgid," >>$file_resp_new
+	    echo "\"tests\": [" >>$file_resp_new
+	    echo "{" >>$file_resp_new
+	fi
+    fi
+    echo "$p" >>$file_resp_new
+done < "$file_resp"
+n=`wc -l $file_resp_new|awk '{print $1}'`
+i=1
+ip1=2
+ip2=3
+ip3=4
+while test $i -lt $n
+do
+    p=`head -$i $file_resp_new|tail -1`
+    q=`head -$ip1 $file_resp_new|tail -1`
+    r=`head -$ip2 $file_resp_new|tail -1`
+    s=`head -$ip3 $file_resp_new|tail -1`
+    echo "$p"|grep "}," >/dev/null
+    if test "$?" -eq 0
+    then
+	echo "$q"|grep "^$" >/dev/null
+	if test "$?" -eq 0
+	then
+	    echo "$r"|grep "{" >/dev/null
+	    if test "$?" -eq 0
+	    then
+		echo "$s"|grep "]" >/dev/null
+		if test "$?" -eq 0
+		then
+		    ip6=`expr $i + 6`
+		    head -$ip6 $file_resp_new|tail -1
+		    echo "}" >>$file_resp_new_new
+		    echo "]" >>$file_resp_new_new
+		    i=`expr $i + 4`
+		    ip1=`expr $ip1 + 4`
+		    ip2=`expr $ip2 + 4`
+		    ip3=`expr $ip3 + 4`
+#		    echo "$i $ip1 $ip2 $ip3"
+		    continue
+		fi
+	    fi
+	fi
+    fi
+    echo "$p" >>$file_resp_new_new
+    i=`expr $i + 1`
+    ip1=`expr $ip1 + 1`
+    ip2=`expr $ip2 + 1`
+    ip3=`expr $ip3 + 1`
+#    echo "$i $ip1 $ip2 $ip3"
+done

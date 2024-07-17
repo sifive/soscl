@@ -1,0 +1,24 @@
+a=0
+if test "$#" -ne 1
+then
+    echo "usage is: >$0 <filename>"
+    exit 1
+fi
+filein=$1
+while read -r line
+do
+    echo $line|grep "aadlen\:0 ">/dev/null
+    if test "$?" -eq 0
+    then
+	echo $line|grep "inputlen\:0 ">/dev/null
+	if test "$?" -eq 0
+	then
+	    a=`expr $a + 1`
+	else
+	    echo $line
+	fi
+    else
+	echo $line
+    fi
+done<$filein
+echo $a

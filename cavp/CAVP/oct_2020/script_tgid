@@ -1,0 +1,30 @@
+#!/bin/sh
+file=$1
+n=0
+tcid_prev=0
+while read p
+do
+    n=`expr $n + 1`
+    echo "$p"|grep -i "tgid" >/dev/null
+    if test "$?" -eq 0
+    then
+	tgid=`echo "$p"|awk -F":" '{print $2}'|tr -d ","`
+	m=$n
+	found=0
+	while test $found -eq 0
+	do
+	    line=`head -$m "$file"|tail -1`
+	    echo "$line"|grep -i "tcid" >/dev/null
+	    if test "$?" -eq 0
+	    then
+		tcid=`echo "$line"|awk -F":" '{print $2}'|tr -d ","`
+		di=`expr $tcid - $tcid_prev`
+		echo "$tgid  $tcid $di" >>liste
+		echo "$tgid  $tcid $di"
+		tcid_prev=$tcid
+		found=1
+	    fi
+	    m=`expr $m + 1`
+	done
+    fi
+done < "$file"

@@ -1,0 +1,18 @@
+[
+    {
+      "url": "/acvp/v1/persons"
+    }, 
+    {
+      "fullName": "Security Team",
+      "vendorUrl": "/acvp/v1/vendors/xxxxx",
+      "emails": [
+        "info@sifive.com"
+      ],
+      "phoneNumbers": [
+        {
+          "number": "+1 415 673-2836",
+          "type": "voice"
+        }
+      ]
+    }
+]

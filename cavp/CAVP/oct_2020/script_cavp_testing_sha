@@ -1,0 +1,117 @@
+#script for ACVP SHA json test vectors files conversion: ticket #HWCA-96
+#a test vectors file is supposed to be dedicated to one single mode
+#this script considers the test vectors responses file is also present
+#(should not be the case for the real CAVP-ACVP testing)
+#!/bin/sh
+#v 1.0: support all modes
+if test "$#" -ne 2
+then
+    echo "ERROR: format is > $0 <cavp_vector_json_file> <cavp_results_json_file>"
+    echo "$#"
+    exit 0
+fi
+
+#no echo because the script output is redirected
+#echo "CAVP ACVP SHA json file processing"
+
+vector_file=$1
+result_file=$2
+
+tc_id_ok=0
+input_ok=0
+len_ok=0
+mct=0
+aft=0
+algo="unknown"
+
+#determine the algorithm (shall be SHA!) and the mode of operation
+algo=`grep "algorithm" "$vector_file"|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+modop=`echo $algo|cut -c5-7`
+algo=`echo $algo|cut -c1-4`
+echo $algorithm" "$algo" "$modop
+if test "$algo" != "SHA2"
+then
+    echo "ERROR: this script only supports SHA files"
+    exit 1
+fi
+
+#reading all the file lines (the file is given at the done)
+while read p
+do
+
+    #determine the test category: MCT or AFT
+    echo $p|grep "testType"|grep "MCT" >/dev/null
+    if test "$?" -eq 0
+    then
+	mct=1
+	aft=0
+    fi
+    echo $p|grep "testType"|grep "AFT" >/dev/null
+    if test "$?" -eq 0
+    then
+	mct=0
+	aft=1
+    fi
+
+    #searching for the result
+    echo $p|grep "tcId" >/dev/null
+    if test "$?" -eq 0
+    then
+	test_number=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	tc_id_ok=1
+	#search the result of this vector in the result file
+	#first search the line of this test number in the result file
+	noline=`grep -n "tcId" "$result_file"|grep ": $test_number,"|awk -F":" '{print $1}'`
+	#if simple test vector, the output is on one line in the responses file, the line after the tcId line
+	if test "$mct" -eq 0
+	then
+	    #increment by 1, as the result is in the next line, tagged with md
+	    nl=`expr $noline + 1`
+	    output=`head -$nl "$result_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	else
+	    #if mct test vector, the output is on 100 distinct lines in the responses file
+	    #otherwise, for aft, the result is on one single line
+	    nl=`expr $noline + 3`
+	    i=0
+	    output=""
+	    while test $i -ne 100
+	    do
+		md=`head -$nl "$result_file"|tail -1|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+		output=`echo "$output$md"`
+		nl=`expr $nl + 3`
+		i=`expr $i + 1`
+	    done
+	fi
+    fi
+
+    #determine the input ("msg")
+    echo $p|grep "msg" >/dev/null
+    if test "$?" -eq 0
+    then
+	input=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	input_ok=1
+    fi
+
+ #   determine the msg len (in bits)
+    echo $p|grep "\"len\":" >/dev/null
+   if test "$?" -eq 0
+  then
+	len=`echo $p|awk -F":" '{print $2}'|tr -d [:punct:]|tr -d [:space:]`
+	len_ok=1
+   fi
+    if test "$input_ok" -eq 1 -a "$len_ok" -eq 1 -a "$tc_id_ok" -eq 1
+    then
+	len_ok=0
+	tc_id_ok=0
+	input_ok=0
+	if test "$mct" -eq 1
+	then
+	    type="MCT"
+	fi
+	if test "$aft" -eq 1
+	then
+	    type="AFT"
+	fi
+	echo "algo:$algo type:$type test:$test_number mode:$modop length:$len input:$input output:$output"
+    fi
+done <"$vector_file"
