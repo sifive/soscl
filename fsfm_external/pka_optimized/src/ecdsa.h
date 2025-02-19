@@ -1,6 +1,8 @@
 #ifndef ECDSA_DEFS
 #define ECDSA_DEFS
 
+#include "ecc.h"
+
 #define ECDSA_SECP256R1 1
 #define ECDSA_SECP256K1 2
 #define ECDSA_SECP384R1 3
@@ -13,12 +15,6 @@
 #define ECDSA_MAX_BYTES 48
 #define SIFIVE_ECDSA_MESSAGE_DIGEST 0
 #define SIFIVE_ECDSA_MESSAGE 1
-
-struct signature_type {
-  uint8_t *r;
-  uint8_t *s;
-};
-
 
 //p256r1
 

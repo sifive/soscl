@@ -21,8 +21,10 @@
 #include "sifive_hca1_regs.h"
 #include "scl_defs.h"
 #include "pka.h"
+#include "ecc.h"
 #include "bignum.h"
 #include "ecdsa.h"
+#include "sm2.h"
 
 //---------------------
 //--------------------------------------------------------------------------------------------------
@@ -36,45 +38,6 @@
 #define OPERAND_SIZE_BITS 384U
 /** Operands size in bytes */
 #define OPERAND_SIZE_BYTES ((OPERAND_SIZE_BITS) / CHAR_BIT)
-
-//--------------------------------------------------------------------------------------------------
-// Types
-//--------------------------------------------------------------------------------------------------
-
-
-/**
- * Data set to perform jacobian double computation
- */
-struct jacobian_double_ctx {
-    struct jacobian_point *point_in; /**< Input Jacobian coordinates */
-    struct jacobian_point *point_out; /**< Output Jacobian coordinates */
-    const uint8_t *modulus; /**< Modulo data */
-    const uint8_t *inverse; /**< inverse precalculated values to emulate division operation */
-    size_t bit_curve_size; /**< bitsize size of operands in bits*/
-};
-
-/**
- * Double Jacobian implementation pointer
- */
-typedef int (*pka_double_jacobian_t)(const struct jacobian_point *q_in,
-                                     struct jacobian_point *q_out, const uint8_t *inverse,
-                                     size_t bitsize);
-
-/**
- * Data set to perform jacobian add computation
- */
-struct jacobian_add_ctx {
-    struct jacobian_point *point_in1; /**< Input Jacobian #1 coordinates */
-    struct jacobian_point *point_in2; /**< Input Jacobian #2 coordinates */
-    struct jacobian_point *point_out; /**< Output Jacobian coordinates */
-    const uint8_t *modulus; /**< Modulo data */
-    size_t bit_curve_size; /**< bitsize size of operands in bits*/
-};
-
-/**
- * add Jacobian implementation pointer
- */
-typedef int (*pka_add_jacobian_t)(const struct jacobian_point *q_in1,const struct jacobian_point *q_in2,struct jacobian_point *q_out, size_t bitsize);
 
 //--------------------------------------------------------------------------------------------------
 // Variables
@@ -360,8 +323,28 @@ uint8_t p384r1_signature1_s[]={0xae,0xc6,0xd3,0x28,0xe1,0x77,0x3f,0xa3,0x6e,0x7b
 //uint8_t p384r1_message1[]={0x9dd789ea25c04745d57a381f22de01fb0abd3c72dbdefd44e43213c189583eef85ba662044da3de2dd8670e6325154480155bbeebb702c75781ac32e13941860cb576fe37a05b757da5b5b418f6dd7c30b042e40f4395a342ae4dce05634c33625e2bc524345481f7e253d9551266823771b251705b4a85166022a37ac28f1bd}
 uint8_t p384r1_message1_digest[]={0x70,0x4d,0x5d,0x70,0x37,0xac,0x51,0x0b,0xb4,0x28,0xdb,0x63,0x00,0x44,0x0e,0x10,0x74,0xc7,0xa8,0x3b,0xd3,0x0a,0xac,0x4d,0x33,0x68,0xdd,0x80,0x00,0xcb,0xc9,0x56,0x91,0x47,0x23,0xcc,0x8f,0xe7,0x88,0xeb,0x43,0x74,0x4f,0xd3,0xf5,0x83,0x5b,0x96};
 
+//SM2 P256 test vector from http://www.gmbz.org.cn/upload/2018-07-24/1532401673138056311.pdf
+
+//public key:
+//coordinate 𝑥𝐴 : 09F9DF311E5421A150DD7D161E4BC5C672179FAD1833FC076BB08FF356F35020
+uint8_t sm2_p256v1_pubkey1_x[]={0x20,0x50,0xF3,0x56,0xF3,0x8F,0xB0,0x6B,0x07,0xFC,0x33,0x18,0xAD,0x9F,0x17,0x72,0xC6,0xC5,0x4B,0x1E,0x16,0x7D,0xDD,0x50,0xA1,0x21,0x54,0x1E,0x31,0xDF,0xF9,0x09};
+
+//coordinate 𝑦𝐴: CCEA490CE26775A52DC6EA718CC1AA600AED05FBF35E084A6632F6072DA9AD13
+uint8_t sm2_p256v1_pubkey1_y[]={0x13,0xAD,0xA9,0x2D,0x07,0xF6,0x32,0x66,0x4A,0x08,0x5E,0xF3,0xFB,0x05,0xED,0x0A,0x60,0xAA,0xC1,0x8C,0x71,0xEA,0xC6,0x2D,0xA5,0x75,0x67,0xE2,0x0C,0x49,0xEA,0xCC};
+
+// hash value input to the function: 𝐻256(𝑀̅): F0B43E94BA45ACCAACE692ED534382EB17E6AB5A19CE7B31F4486FDFC0D28640
+uint8_t sm2_p256v1_message1_digest[]={0x40,0x86,0xD2,0xC0,0xDF,0x6F,0x48,0xF4,0x31,0x7B,0xCE,0x19,0x5A,0xAB,0xE6,0x17,0xEB,0x82,0x43,0x53,0xED,0x92,0xE6,0xAC,0xCA,0xAC,0x45,0xBA,0x94,0x3E,0xB4,0xF0};
+
+//value 𝑟: F5A03B0648D2C4630EEAC513E1BB81A15944DA3827D5B74143AC7EACEEE720B3
+uint8_t sm2_p256v1_signature1_r[]={0xB3,0x20,0xE7,0xEE,0xAC,0x7E,0xAC,0x43,0x41,0xB7,0xD5,0x27,0x38,0xDA,0x44,0x59,0xA1,0x81,0xBB,0xE1,0x13,0xC5,0xEA,0x0E,0x63,0xC4,0xD2,0x48,0x06,0x3B,0xA0,0xF5};
+
+//value 𝑠: B1B6AA29DF212FD8763182BC0D421CA1BB9038FD1F7F42D4840B69C485BBC1AA
+
+uint8_t sm2_p256v1_signature1_s[]={0xAA,0xC1,0xBB,0x85,0xC4,0x69,0x0B,0x84,0xD4,0x42,0x7F,0x1F,0xFD,0x38,0x90,0xBB,0xA1,0x1C,0x42,0x0D,0xBC,0x82,0x31,0x76,0xD8,0x2F,0x21,0xDF,0x29,0xAA,0xB6,0xB1};
+  
 struct curve_type p256r1;
 struct curve_type p384r1;
+struct curve_type sm2p256v1;
 
 /**
  * ECC curve init function to assign curve domain parameters
@@ -391,8 +374,18 @@ void curve_init(void)
   p384r1.xg=(uint8_t*)ECDSA_SECP384R1_XG;
   p384r1.yg=(uint8_t*)ECDSA_SECP384R1_YG;
   p384r1.inverse=(uint8_t*)ECDSA_SECP384R1_INV2;
-}
 
+  sm2p256v1.bitsize=SM2_P256V1_BITSIZE;
+  sm2p256v1.bytesize=SM2_P256V1_BYTESIZE;
+  sm2p256v1.identifier=SM2_P256V1;
+  sm2p256v1.n=(uint8_t*)SM2_P256V1_N;
+  sm2p256v1.nminus2=(uint8_t*)SM2_P256V1_N_MINUS2;
+  sm2p256v1.pminus2=(uint8_t*)SM2_P256V1_P_MINUS2;
+  sm2p256v1.p=(uint8_t*)SM2_P256V1_P;
+  sm2p256v1.xg=(uint8_t*)SM2_P256V1_XG;
+  sm2p256v1.yg=(uint8_t*)SM2_P256V1_YG;
+  sm2p256v1.inverse=(uint8_t*)SM2_P256V1_INV2;
+}
 
 /**
  * ECDSA test function using p256r1 and p384r1 KAT
@@ -401,6 +394,10 @@ void curve_init(void)
 */
 int test_ecdsa_verif(void)
 {
+  uint64_t cycles;
+  clock_t tick;
+  clock_t t0;
+  uint64_t c0;
   struct signature_type sign;
   uint8_t message[3];
   struct affine_point pubkey;
@@ -413,7 +410,12 @@ int test_ecdsa_verif(void)
   sign.r=p256r1_signature1_r;
   sign.s=p256r1_signature1_s;
   printf("signature verif p256r1 #1\n");
+  t0 = clock();
+  c0 = riscv_read_mcycle();
   rc=ecdsa_verification(&sign,p256r1_message1_digest,256,message,3,&pubkey, &p256r1,configuration);
+  cycles = riscv_read_mcycle() - c0;
+  tick = clock() - t0;
+  printf("ecdsa verification:  cycles: %" PRIu64 "  ticks:  %lu\n", cycles, tick);
   if(SIFIVE_SCL_OK==rc)
     printf("SIGNATURE OK\n");
   else
@@ -469,6 +471,43 @@ int test_ecdsa_verif(void)
     printf("SIGNATURE OK\n");
   else
     printf("SIGNATURE NOK\n");    
+  return(rc);
+}
+
+/**
+ * SM2 test function using sm2p256v1 KAT
+ * @param void
+ * @return @c 0 on success, otherwise a negative error code
+*/
+int test_sm2_verif(void)
+{
+  uint64_t cycles;
+  clock_t tick;
+  clock_t t0;
+  uint64_t c0;
+  struct signature_type sign;
+  struct affine_point pubkey;
+  int configuration;
+  int rc;
+  printf("********** sm2 verif test\n");
+  configuration=SIFIVE_SM2_MESSAGE_DIGEST;
+  pubkey.x=sm2_p256v1_pubkey1_x;
+  pubkey.y=sm2_p256v1_pubkey1_y;
+  sign.r=sm2_p256v1_signature1_r;
+  sign.s=sm2_p256v1_signature1_s;
+  printf("signature verif sm2_p256v1 #1\n");
+
+  t0 = clock();
+  c0 = riscv_read_mcycle();
+  rc=sm2_verification(&sign,sm2_p256v1_message1_digest,256,&pubkey, &sm2p256v1,configuration);
+  cycles = riscv_read_mcycle() - c0;
+  tick = clock() - t0;
+  printf("sm2 verification:  cycles: %" PRIu64 "  ticks:  %lu\n", cycles, tick);
+  if(SIFIVE_SCL_OK==rc)
+    printf("SIGNATURE OK\n");
+  else
+    printf("SIGNATURE NOK\n");
+
   return(rc);
 }
 
@@ -794,7 +833,7 @@ int test_short(void)
   rc = sifive_bignum_compare(a.x, (uint8_t*) _expected_converta_x,ECDSA_SECP256R1_BYTESIZE);
     if (0!=rc) {
       display_value("a.x",a.x,32);
-      display_value("exp",_expected_converta_x,32);
+      display_value("exp",(uint8_t *)_expected_converta_x,32);
       //      return EXIT_FAILURE;
       }
     rc = sifive_bignum_compare(a.y, (uint8_t*) _expected_converta_y,ECDSA_SECP256R1_BYTESIZE);
@@ -1153,7 +1192,7 @@ static void show_software(void)
 int main(void)
 {
   int rc;
-  printf("******************** PKA testing (modular operations, ECC operations, ECDSA verification)\n");
+  printf("******************** PKA testing (modular operations, ECC operations, ECDSA and SM2 verification)\n");
   rc= _pka_hca_initialization();
   if (rc) {
     return EXIT_FAILURE;
@@ -1165,8 +1204,9 @@ int main(void)
   show_software();
   curve_init();
   test_short();
-  test_bignum();
+  test_sm2_verif();
   test_ecdsa_verif();
+  test_bignum();
   test_long();
   printf("******************** END\n");
   return EXIT_SUCCESS;

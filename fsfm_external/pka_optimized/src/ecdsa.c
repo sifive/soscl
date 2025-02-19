@@ -27,6 +27,7 @@
 #include "sifive_hca1_regs.h"
 #include "scl_defs.h"
 #include "pka.h"
+#include "ecc.h"
 #include "bignum.h"
 #include "ecdsa.h"
 //---------------------
@@ -39,44 +40,6 @@
 /** Operands size in bytes */
 #define OPERAND_SIZE_BYTES ((OPERAND_SIZE_BITS) / CHAR_BIT)
 
-//--------------------------------------------------------------------------------------------------
-// Types
-//--------------------------------------------------------------------------------------------------
-
-/**
- * Data set to perform jacobian double computation
- */
-struct jacobian_double_ctx {
-    struct jacobian_point *point_in; /**< Input Jacobian coordinates */
-    struct jacobian_point *point_out; /**< Output Jacobian coordinates */
-    const uint8_t *modulus; /**< Modulo data */
-    const uint8_t *inverse; /**< inverse precalculated values to emulate division operation */
-    size_t bit_curve_size; /**< bitsize size of operands in bits*/
-};
-
-/**
- * Double Jacobian implementation pointer
- */
-typedef int (*pka_double_jacobian_t)(const struct jacobian_point *q_in,
-                                     struct jacobian_point *q_out, const uint8_t *inverse,
-                                     size_t bitsize);
-
-/**
- * Data set to perform jacobian add computation
- */
-struct jacobian_add_ctx {
-    struct jacobian_point *point_in1; /**< Input Jacobian #1 coordinates */
-    struct jacobian_point *point_in2; /**< Input Jacobian #2 coordinates */
-    struct jacobian_point *point_out; /**< Output Jacobian coordinates */
-    const uint8_t *modulus; /**< Modulo data */
-    size_t bit_curve_size; /**< bitsize size of operands in bits*/
-};
-
-
-/**
- * add Jacobian implementation pointer
- */
-typedef int (*pka_add_jacobian_t)(const struct jacobian_point *q_in1,const struct jacobian_point *q_in2,struct jacobian_point *q_out, size_t bitsize);
 
 //--------------------------------------------------------------------------------------------------
 // Variables
@@ -201,8 +164,9 @@ int ecdsa_verification(struct signature_type *signature,uint8_t *digest,int dige
   for(i=curve->bitsize/2-1;i>=0;i--)
     {
       //4.1
-      sifive_ecc_pka_double_jacobian(&pointj,&pointj,curve->inverse, curve->bitsize);
-      sifive_ecc_pka_double_jacobian(&pointj,&pointj,curve->inverse, curve->bitsize);
+      //      sifive_ecc_pka_double_jacobian(&pointj,&pointj,curve->inverse, curve->bitsize);
+      //sifive_ecc_pka_double_jacobian(&pointj,&pointj,curve->inverse, curve->bitsize);
+      sifive_ecc_pka_quadruple_jacobian(&pointj,&pointj,curve->inverse, curve->bitsize);
       //4.2 two-bit wide at a time
       kili=(sifive_array_bit(u1,i*2)^(sifive_array_bit(u1,i*2+1)<<1))^((sifive_array_bit(u2,i*2)^(sifive_array_bit(u2,i*2+1)<<1))<<2);
       if(0!=kili)
@@ -219,15 +183,17 @@ int ecdsa_verification(struct signature_type *signature,uint8_t *digest,int dige
   sifive_bignum_set_one_value(zJ,1,curve->bytesize);
   sifive_hca_pka_set_modulus(_hca_dev,curve->n ,curve->bitsize);
   //(xJ*zJ)mod n=(xJ*1)mod n=xJ mod n
+  // yJ contains the result, so x1
   sifive_hca_pka_mod_mult(_hca_dev,xJ,zJ,yJ,curve->bitsize,&op_config);
-  printf("v    : ");
+  /*
+    printf("v    : ");
   for(i=0;i<(int)curve->bytesize;i++)
     printf("%02x",yJ[i]);
   printf("\n");
   printf("sig.r: ");
   for(i=0;i<(int)curve->bytesize;i++)
     printf("%02x",signature->r[i]);
-  printf("\n");
+    printf("\n");*/
   //6. check if r=x1
   return(memcmp(yJ,signature->r,curve->bytesize));
 }

@@ -157,7 +157,7 @@ int sifive_ecc_infinite_jacobian(const struct jacobian_point *q, size_t curve_bi
  * @param inverse precalculeted values to emulate division operation
  * @param bitsize size of operands in bits
  *
- * @return @c 0 on success, otherwise a negative error code
+* @return @c 0 on success, otherwise a negative error code
  */
 int sifive_ecc_pka_double_jacobian_non_opt(const struct jacobian_point *q_in, struct jacobian_point *q_out, const uint8_t *inverse, size_t bitsize)
 {
@@ -1190,6 +1190,369 @@ int sifive_ecc_pka_double_jacobian(const struct jacobian_point *q_in, struct jac
     return rc;
 }
 
+int sifive_ecc_pka_quadruple_jacobian(const struct jacobian_point *q_in, struct jacobian_point *q_out, const uint8_t *inverse, size_t bitsize)
+{
+    // Algorithm 14 from Rivain Fast and Regular Algorithms for Scalar Multiplication
+    // over Elliptic Curves
+    // Restricted to a=-3
+
+ uint8_t _t1[OPERAND_SIZE_BYTES];
+ uint8_t _t4[OPERAND_SIZE_BYTES];
+ uint8_t _t5[OPERAND_SIZE_BYTES];
+  int rc;
+  volatile HCA_Type *hca_base = (volatile HCA_Type *)_hca_dev->hwdesc->base_address;
+  int curve_bytesize=bitsize/8;
+  
+  if(SIFIVE_SCL_TRUE==sifive_ecc_infinite_jacobian(q_in,bitsize))
+    {
+      //return(x2:y2:1)
+      sifive_bignum_memcpy(q_out->x,q_in->x,curve_bytesize);
+      sifive_bignum_memcpy(q_out->y,q_in->y,curve_bytesize);
+      sifive_bignum_set_one_value(q_out->z,0,curve_bytesize);
+      return(SIFIVE_SCL_OK);
+    }
+
+    //t4=t2^2=q_in.y^2
+    //load q_in.y in A
+    //compute A square
+    //store result in A
+    hca_base->PKA_OPA = (uintptr_t)q_in->y;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+    
+    //t5==t4*t1=t4*q_in.x
+    //reuse t4 in A
+    //load q_in.x in B
+    //mult A & B
+    //store in mem (t5)
+    hca_base->PKA_OPB = (uintptr_t)q_in->x;
+    hca_base->PKA_RES = (uintptr_t)_t5;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+    rc=run_and_check(hca_base);
+    
+    //t4=t4^2
+    //reuse t4 in A
+    //compute A square
+    //store result in mem (t4)
+    hca_base->PKA_RES = (uintptr_t)_t4;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+
+    rc=run_and_check(hca_base);
+
+    //t2=t2*t3
+    //load t2 (q_in.y) in B, t3 (q.in.z) in A
+    //compute mult
+    //store result in mem, q.out->z
+    hca_base->PKA_OPA = (uintptr_t)q_in->z;
+    hca_base->PKA_OPB = (uintptr_t)q_in->y;
+    hca_base->PKA_RES = (uintptr_t)q_out->z;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+    rc=run_and_check(hca_base);
+    
+    //t3=t3^2
+    //reuse t3 in A
+    //compute A square
+    //store in A
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+    
+    //t1=t1+t3 (=t3+t1)
+    //load t1 in B
+    //reuse t3 in A
+    //compute add
+    //store in t1 (mem)
+
+    hca_base->PKA_OPB = (uintptr_t)q_in->x;
+    hca_base->PKA_RES = (uintptr_t)_t1;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_ADD))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+
+    rc=run_and_check(hca_base);
+
+    //t3=t3+t3
+    //t3 already in A
+    //dbl
+    //store t3 in B, not in mem
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_DOUBLE))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_B_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+
+      //t3=t1-t3
+    //load t1 in A
+    //sub
+    //store in B, not in mem
+    hca_base->PKA_OPA = (uintptr_t)_t1;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_B_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+
+    //t1=t1*t3
+    //no load
+    //mult
+    //store in A, not in mem
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+
+    //t3=t1+t1
+    //no load
+    //dble
+    //store in B, not in mem
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_DOUBLE))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_B_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+      
+    //t1=t1+t3
+    //no load
+    //add
+    //store in A, not in mem
+    //t3 useless
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_ADD))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+
+    //t1=t1/2
+    //load /2 in B
+    //mult
+    //store in A
+    //store in mem (t1)
+
+  hca_base->PKA_OPB = (uintptr_t)inverse;
+  hca_base->PKA_RES = (uintptr_t)_t1;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_A_HW;
+
+  rc=run_and_check(hca_base);
+      
+    //t3=t1^2
+    //no load
+    //sq
+    //store in A
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+  rc=run_and_check(hca_base);
+      
+    //t3=t3-t5
+    //load t5 in B
+    //sub
+    //resu in A
+    hca_base->PKA_OPB = (uintptr_t)_t5;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+      
+    //t3=t3-t5
+    //no load
+    //sub
+    //store in mem (q.out->x)
+    //store in B
+    hca_base->PKA_RES = (uintptr_t)q_out->x;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_B_HW;
+
+    rc=run_and_check(hca_base);
+      
+    //t5=t5-t3
+    //load t5 in A
+    //sub
+    //store in B (t3 useless)
+    hca_base->PKA_OPA = (uintptr_t)_t5;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_B_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+
+    //t1=t1*t5
+    //load t1 in A
+    //mult
+    //store in A
+    //t5 useless
+    hca_base->PKA_OPA = (uintptr_t)_t1;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+      
+    //t1=t1-t4
+    //load t4 in B
+    //sub
+    //store in mem (q_out>y)
+    hca_base->PKA_OPB = (uintptr_t)_t4;
+    //    hca_base->PKA_RES = (uintptr_t)q_out->y;
+    hca_base->PKA_RES = (uintptr_t)_t1;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_A_HW;
+
+    rc=run_and_check(hca_base);
+
+    /*************************************************************/
+    //t4=t2^2=q_in.y^2
+    //load q_in.y in A
+    //compute A square
+    //store result in A
+    //    hca_base->PKA_OPA = (uintptr_t)q_out->y;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+    
+    //t5==t4*t1=t4*q_in.x
+    //reuse t4 in A
+    //load q_in.x in B
+    //mult A & B
+    //store in mem (t5)
+    hca_base->PKA_OPB = (uintptr_t)q_out->x;
+    hca_base->PKA_RES = (uintptr_t)_t5;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+    rc=run_and_check(hca_base);
+    
+    //t4=t4^2
+    //reuse t4 in A
+    //compute A square
+    //store result in mem (t4)
+    hca_base->PKA_RES = (uintptr_t)_t4;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+
+    rc=run_and_check(hca_base);
+
+    //t2=t2*t3
+    //load t2 (q_in.y) in B, t3 (q.in.z) in A
+    //compute mult
+    //store result in mem, q.out->z
+    hca_base->PKA_OPA = (uintptr_t)q_out->z;
+    //    hca_base->PKA_OPB = (uintptr_t)q_out->y;
+    hca_base->PKA_OPB = (uintptr_t)_t1;
+    hca_base->PKA_RES = (uintptr_t)q_out->z;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+    rc=run_and_check(hca_base);
+    
+    //t3=t3^2
+    //reuse t3 in A
+    //compute A square
+    //store in A
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+
+    //t1=t1+t3 (=t3+t1)
+    //load t1 in B
+    //reuse t3 in A
+    //compute add
+    //store in t1 (mem)
+
+    hca_base->PKA_OPB = (uintptr_t)q_out->x;
+    hca_base->PKA_RES = (uintptr_t)_t1;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_ADD))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+
+    rc=run_and_check(hca_base);
+    
+    //t3=t3+t3
+    //t3 already in A
+    //dbl
+    //store t3 in B, not in mem
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_DOUBLE))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_B_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+
+      //t3=t1-t3
+    //load t1 in A
+    //sub
+    //store in B, not in mem
+    hca_base->PKA_OPA = (uintptr_t)_t1;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_B_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+
+    //t1=t1*t3
+    //no load
+    //mult
+    //store in A, not in mem
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+
+    //t3=t1+t1
+    //no load
+    //dble
+    //store in B, not in mem
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_DOUBLE))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_B_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+      
+    //t1=t1+t3
+    //no load
+    //add
+    //store in A, not in mem
+    //t3 useless
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_ADD))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+
+    //t1=t1/2
+    //load /2 in B
+    //mult
+    //store in A
+    //store in mem (t1)
+
+  hca_base->PKA_OPB = (uintptr_t)inverse;
+  hca_base->PKA_RES = (uintptr_t)_t1;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_A_HW;
+
+  rc=run_and_check(hca_base);
+      
+    //t3=t1^2
+    //no load
+    //sq
+    //store in A
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+  rc=run_and_check(hca_base);
+      
+    //t3=t3-t5
+    //load t5 in B
+    //sub
+    //resu in A
+    hca_base->PKA_OPB = (uintptr_t)_t5;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+      
+    //t3=t3-t5
+    //no load
+    //sub
+    //store in mem (q.out->x)
+    //store in B
+    hca_base->PKA_RES = (uintptr_t)q_out->x;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_B_HW;
+
+    rc=run_and_check(hca_base);
+
+    //t5=t5-t3
+    //load t5 in A
+    //sub
+    //store in B (t3 useless)
+    hca_base->PKA_OPA = (uintptr_t)_t5;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_B_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+
+    //t1=t1*t5
+    //load t1 in A
+    //mult
+    //store in A
+    //t5 useless
+    hca_base->PKA_OPA = (uintptr_t)_t1;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+
+    rc=run_and_check(hca_base);
+      
+    //t1=t1-t4
+    //load t4 in B
+    //sub
+    //store in mem (q_out>y)
+    hca_base->PKA_OPB = (uintptr_t)_t4;
+    hca_base->PKA_RES = (uintptr_t)q_out->y;
+    hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))| HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+
+    rc=run_and_check(hca_base);
+    return rc;
+
+}
+
+
 /* add jacobian jacobian function variants*/
 
 //same paper, alg15
@@ -1227,7 +1590,7 @@ int sifive_ecc_pka_add_jacobian_jacobian_non_opt(const struct jacobian_point *q_
 }
 
 //same paper, alg15
-int sifive_ecc_pka_add_jacobian_jacobian(const struct jacobian_point *q_in1, const struct jacobian_point *q_in2, struct jacobian_point *q_out,size_t bitsize)
+int sifive_ecc_pka_add_jacobian_jacobian_prev(const struct jacobian_point *q_in1, const struct jacobian_point *q_in2, struct jacobian_point *q_out,size_t bitsize)
 {
   int rc=0;
   volatile HCA_Type *hca_base = (volatile HCA_Type *)_hca_dev->hwdesc->base_address;
@@ -1247,7 +1610,7 @@ int sifive_ecc_pka_add_jacobian_jacobian(const struct jacobian_point *q_in1, con
   hca_base->PKA_OPA=(uintptr_t)q_in1->z;
   hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
     rc=run_and_check(hca_base);
-    //while ((hca_base->PKA_SR & HCA_PKA_SR_BUSY_Msk));
+
   //t4=t4*t7
   //  sifive_hca_pka_mod_mult(_hca_dev,q_in2->x,_t7,_t4,bitsize,&op_config);
   hca_base->PKA_OPB=(uintptr_t)q_in2->x;
@@ -1260,7 +1623,6 @@ int sifive_ecc_pka_add_jacobian_jacobian(const struct jacobian_point *q_in1, con
   hca_base->PKA_OPB=(uintptr_t)q_in2->y;
   hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_B_HW | HCA_PKA_CR_NSRTM_Msk;
   rc=run_and_check(hca_base);
-  //  while ((hca_base->PKA_SR & HCA_PKA_SR_BUSY_Msk));
 
   //t5=t5*t3
   //sifive_hca_pka_mod_mult(_hca_dev,_t5,_t7,_t5,bitsize,&op_config);
@@ -1268,12 +1630,11 @@ int sifive_ecc_pka_add_jacobian_jacobian(const struct jacobian_point *q_in1, con
   hca_base->PKA_RES = (uintptr_t)_t5;
   hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
   rc=run_and_check(hca_base);
-  
+  /************************************************************/
   // t7=t6^2
   //sifive_hca_pka_mod_square(_hca_dev,q_in2->z,_t7,bitsize,&op_config);
   hca_base->PKA_OPA=(uintptr_t)q_in2->z;
-  hca_base->PKA_RES = (uintptr_t)_t7;
-  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_B_HW;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_B_HW| HCA_PKA_CR_NSRTM_Msk;
   rc=run_and_check(hca_base);
 
   //t1=t1*t7
@@ -1288,7 +1649,6 @@ int sifive_ecc_pka_add_jacobian_jacobian(const struct jacobian_point *q_in1, con
   hca_base->PKA_OPA=(uintptr_t)q_in1->y;
   hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
    rc=run_and_check(hca_base);
-   //while ((hca_base->PKA_SR & HCA_PKA_SR_BUSY_Msk));
 
   //t2=t2*t6
   //sifive_hca_pka_mod_mult(_hca_dev,_t2,_t7,_t2,bitsize,&op_config);
@@ -1310,7 +1670,6 @@ int sifive_ecc_pka_add_jacobian_jacobian(const struct jacobian_point *q_in1, con
   hca_base->PKA_OPA=(uintptr_t)q_in1->z;
   hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
   rc=run_and_check(hca_base);
-  //  while ((hca_base->PKA_SR & HCA_PKA_SR_BUSY_Msk));
 
   //t3=t3*t6
   //sifive_hca_pka_mod_mult(_hca_dev,q_in2->z,q_in1->z,_t3,bitsize,&op_config);
@@ -1338,7 +1697,6 @@ int sifive_ecc_pka_add_jacobian_jacobian(const struct jacobian_point *q_in1, con
   hca_base->PKA_OPA=(uintptr_t)_t1;
   hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
   rc=run_and_check(hca_base);
-  //  while (hca_base->PKA_SR & HCA_PKA_SR_BUSY_Msk);
 
   //t4=t4*t7
   //sifive_hca_pka_mod_mult(_hca_dev,_t4,_t7,_t4,bitsize,&op_config);
@@ -1353,12 +1711,11 @@ int sifive_ecc_pka_add_jacobian_jacobian(const struct jacobian_point *q_in1, con
   hca_base->PKA_RES = (uintptr_t)_t1;
   hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
   rc=run_and_check(hca_base);
-
+  /***************************************************/
   //t7=2*t4
   //sifive_hca_pka_mod_add(_hca_dev,_t4,_t4,_t7,bitsize,&op_config);
   hca_base->PKA_OPA=(uintptr_t)_t4;
-  hca_base->PKA_RES = (uintptr_t)_t7;
-  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_DOUBLE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_B_HW;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_DOUBLE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_B_HW| HCA_PKA_CR_NSRTM_Msk;
   rc=run_and_check(hca_base);
 
   //t6=t6-t7
@@ -1366,7 +1723,6 @@ int sifive_ecc_pka_add_jacobian_jacobian(const struct jacobian_point *q_in1, con
   hca_base->PKA_OPA=(uintptr_t)_t6;
   hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
     rc=run_and_check(hca_base);
-  //  while ((hca_base->PKA_SR & HCA_PKA_SR_BUSY_Msk));
 
   //t6=t6-t1
   //sifive_hca_pka_mod_sub(_hca_dev,_t6,_t1,q_out->x,bitsize,&op_config);
@@ -1406,6 +1762,185 @@ int sifive_ecc_pka_add_jacobian_jacobian(const struct jacobian_point *q_in1, con
   return(rc);
 }
 
+int sifive_ecc_pka_add_jacobian_jacobian(const struct jacobian_point *q_in1, const struct jacobian_point *q_in2, struct jacobian_point *q_out,size_t bitsize)
+{
+  int rc=0;
+  volatile HCA_Type *hca_base = (volatile HCA_Type *)_hca_dev->hwdesc->base_address;
+  if(SIFIVE_SCL_TRUE==sifive_ecc_infinite_jacobian(q_in2,bitsize))
+    {
+      sifive_ecc_jacobian_copy((struct jacobian_point *)q_in1,q_out,bitsize/8);
+      return(SIFIVE_SCL_OK);
+    }
+  if(SIFIVE_SCL_TRUE==sifive_ecc_infinite_jacobian(q_in1,bitsize))
+    {
+      sifive_ecc_jacobian_copy((struct jacobian_point *)q_in2,q_out,bitsize/8);
+      return(SIFIVE_SCL_OK);
+    }
+
+  //t7=t3^2
+  //  sifive_hca_pka_mod_square(_hca_dev,q_in1->z,_t7,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)q_in1->z;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+    rc=run_and_check(hca_base);
+
+  //t4=t4*t7
+  //  sifive_hca_pka_mod_mult(_hca_dev,q_in2->x,_t7,_t4,bitsize,&op_config);
+  hca_base->PKA_OPB=(uintptr_t)q_in2->x;
+  hca_base->PKA_RES = (uintptr_t)_t4;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+  rc=run_and_check(hca_base);
+
+  //t5=t5*t7
+  //sifive_hca_pka_mod_mult(_hca_dev,q_in2->y,q_in1->z,_t5,bitsize,&op_config);
+  hca_base->PKA_OPB=(uintptr_t)q_in2->y;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_B_HW | HCA_PKA_CR_NSRTM_Msk;
+  rc=run_and_check(hca_base);
+
+  //t5=t5*t3
+  //sifive_hca_pka_mod_mult(_hca_dev,_t5,_t7,_t5,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)q_in1->z;
+  hca_base->PKA_RES = (uintptr_t)_t5;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+  rc=run_and_check(hca_base);
+
+  // t7=t6^2
+  //sifive_hca_pka_mod_square(_hca_dev,q_in2->z,_t7,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)q_in2->z;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_B_HW| HCA_PKA_CR_NSRTM_Msk;
+  rc=run_and_check(hca_base);
+
+  //t1=t1*t7
+  //sifive_hca_pka_mod_mult(_hca_dev,q_in1->x,_t7,_t1,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)q_in1->x;
+  hca_base->PKA_RES = (uintptr_t)_t1;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+  rc=run_and_check(hca_base);
+
+  //t2=t2*t7
+  //sifive_hca_pka_mod_mult(_hca_dev,q_in1->y,q_in2->z,_t2,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)q_in1->y;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+   rc=run_and_check(hca_base);
+
+  //t2=t2*t6
+  //sifive_hca_pka_mod_mult(_hca_dev,_t2,_t7,_t2,bitsize,&op_config);
+  hca_base->PKA_OPB=(uintptr_t)q_in2->z;
+  //  hca_base->PKA_RES = (uintptr_t)_t2;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+  rc=run_and_check(hca_base);
+
+  //t2=t2-t5
+  //sifive_hca_pka_mod_sub(_hca_dev,_t2,_t5,_t2,bitsize,&op_config);
+  //  hca_base->PKA_OPA=(uintptr_t)_t2;
+  hca_base->PKA_OPB=(uintptr_t)_t5;
+  hca_base->PKA_RES = (uintptr_t)_t2;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_A_HW;
+  rc=run_and_check(hca_base);
+
+  //t6=t2^2
+  //sifive_hca_pka_mod_square(_hca_dev,_t2,_t6,bitsize,&op_config);
+  hca_base->PKA_RES = (uintptr_t)_t6;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_NOT_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+  rc=run_and_check(hca_base);
+  
+  //t1=t1-t4
+  //sifive_hca_pka_mod_sub(_hca_dev,_t1,_t4,_t1,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)_t1;
+  hca_base->PKA_OPB=(uintptr_t)_t4;
+  hca_base->PKA_RES = (uintptr_t)_t1;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_B_HW| SIFIVE_HCA_PKA_ST_B_HW;
+  rc=run_and_check(hca_base);
+
+  //t3=t3*t1
+  //  sifive_hca_pka_mod_mult(_hca_dev,_t1,_t3,q_out->z,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)q_in1->z;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+  rc=run_and_check(hca_base);
+
+  //t3=t3*t6
+  //sifive_hca_pka_mod_mult(_hca_dev,q_in2->z,q_in1->z,_t3,bitsize,&op_config);
+  hca_base->PKA_OPB=(uintptr_t)q_in2->z;
+  hca_base->PKA_RES = (uintptr_t)q_out->z;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+  rc=run_and_check(hca_base);
+
+  //t7=t1^2
+  //sifive_hca_pka_mod_square(_hca_dev,_t1,_t7,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)_t1;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SQUARE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+  rc=run_and_check(hca_base);
+
+  //t4=t4*t7
+  //sifive_hca_pka_mod_mult(_hca_dev,_t4,_t7,_t4,bitsize,&op_config);
+  hca_base->PKA_OPB=(uintptr_t)_t4;
+  hca_base->PKA_RES = (uintptr_t)_t4;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+  rc=run_and_check(hca_base);
+
+  //t1=t1*t7
+  //sifive_hca_pka_mod_mult(_hca_dev,_t7,_t1,_t1,bitsize,&op_config);
+  hca_base->PKA_OPB=(uintptr_t)_t1;
+  hca_base->PKA_RES = (uintptr_t)_t1;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_B_HW;
+  rc=run_and_check(hca_base);
+
+  //t7=t5*t1
+  //sifive_hca_pka_mod_mult(_hca_dev,_t5,_t1,_t7,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)_t5;
+  //  hca_base->PKA_OPB=(uintptr_t)_t1;
+  hca_base->PKA_RES = (uintptr_t)_t7;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+  rc=run_and_check(hca_base);
+
+  //t7=2*t4
+  //sifive_hca_pka_mod_add(_hca_dev,_t4,_t4,_t7,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)_t4;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_DOUBLE))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_B_HW| HCA_PKA_CR_NSRTM_Msk;
+  rc=run_and_check(hca_base);
+
+  //t6=t6-t7
+  //sifive_hca_pka_mod_sub(_hca_dev,_t6,_t7,_t6,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)_t6;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+    rc=run_and_check(hca_base);
+
+  //t6=t6-t1
+  //sifive_hca_pka_mod_sub(_hca_dev,_t6,_t1,q_out->x,bitsize,&op_config);
+  hca_base->PKA_OPB=(uintptr_t)_t1;
+  hca_base->PKA_RES = (uintptr_t)q_out->x;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_B_HW;
+  rc=run_and_check(hca_base);
+
+  //t4=t4-t6
+  //sifive_hca_pka_mod_sub(_hca_dev,_t4,q_out->x,_t4,bitsize,&op_config);
+  hca_base->PKA_OPA=(uintptr_t)_t4;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_HW| SIFIVE_HCA_PKA_ST_A_HW | HCA_PKA_CR_NSRTM_Msk;
+  rc=run_and_check(hca_base);
+
+  //t2=t2*t4
+  //sifive_hca_pka_mod_mult(_hca_dev,_t2,_t4,_t2,bitsize,&op_config);
+  hca_base->PKA_OPB=(uintptr_t)_t2;
+  hca_base->PKA_RES = (uintptr_t)_t2;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_A_HW;
+  rc=run_and_check(hca_base);
+
+  //t7=t5*t1
+  //sifive_hca_pka_mod_mult(_hca_dev,_t5,_t1,_t7,bitsize,&op_config);
+  //  hca_base->PKA_OPA=(uintptr_t)_t5;
+  //hca_base->PKA_OPB=(uintptr_t)_t1;
+  //hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_MULT))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_A_B_HW| SIFIVE_HCA_PKA_ST_B_HW | HCA_PKA_CR_NSRTM_Msk;
+  //rc=run_and_check(hca_base);
+
+  //t7=t2-t7
+  //sifive_hca_pka_mod_sub(_hca_dev,_t2,_t7,q_out->y,bitsize,&op_config);
+  //  hca_base->PKA_OPA=(uintptr_t)_t2;
+  hca_base->PKA_OPB=(uintptr_t)_t7;
+  hca_base->PKA_RES = (uintptr_t)q_out->y;
+  hca_base->PKA_CR = ((uint32_t)((bitsize << HCA_PKA_CR_OPW_Pos) | SIFIVE_HCA_PKA_MOD_SUB))|HCA_PKA_CR_START_Msk| SIFIVE_HCA_PKA_LD_B_HW| SIFIVE_HCA_PKA_ST_MEM_HW;
+  rc=run_and_check(hca_base);
+  return(rc);
+}
+
 int sifive_ecc_pka_convert_affine_to_jacobian(const struct affine_point *q_in, struct jacobian_point *q_out,size_t bitsize)
 {
   if((NULL==q_in)||(NULL==q_out))
@@ -1426,13 +1961,13 @@ int sifive_ecc_pka_convert_jacobian_to_affine(const struct jacobian_point *q_in,
   };
   if((NULL==q_in)||(NULL==q_out)||(NULL==curve))
     return(-EINVAL);
-  
-  //compute z⁻¹
-  rc=sifive_hca_pka_mod_square(_hca_dev,q_in->z,_t1,curve->bitsize,&op_config);
+
+    //compute z⁻¹
+  rc=sifive_hca_pka_mod_exp(_hca_dev,q_in->z,curve->pminus2,_t1,curve->bitsize,&op_config);
   if(rc<0)
     return(SIFIVE_SCL_NOK);
   //compute z⁻²
-  rc=sifive_hca_pka_mod_exp(_hca_dev,_t1,curve->pminus2,_t2,curve->bitsize,&op_config);
+  rc=sifive_hca_pka_mod_square(_hca_dev,_t1,_t2,curve->bitsize,&op_config);
   if(rc<0)
     return(SIFIVE_SCL_NOK);
   //compute x/z⁻²
@@ -1454,8 +1989,8 @@ void sifive_ecc_pka_get_version(uint8_t *major,uint8_t *minor,uint8_t *patch, ch
 {
   *major=1;
   *minor=0;
-  *patch=0;
-  strcpy(string,"first release");
+  *patch=1;
+  strcpy(string,"add quadruple");
 }
 
 
